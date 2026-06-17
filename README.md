@@ -109,24 +109,6 @@ Input (20, 126)
 
 ---
 
-## 4. Acurácia Alcançada
-
-### Como a acurácia é medida
-
-A acurácia final é calculada sobre o **conjunto de teste (20% dos dados)**, que o modelo **nunca viu durante o treino**. Ao rodar `treinador.py`, o sistema imprime:
-
-```
-Acuracia no teste: 0.XXXX
-Loss no teste:     0.XXXX
-```
-
-e gera dois artefatos em `resultados/`:
-- `historico_treinamento_<timestamp>.png` — curvas de acurácia/loss (treino vs. validação);
-- `matriz_confusao_<timestamp>.png` — onde o modelo acerta e onde confunde sinais.
-
-> **⚠️ Preencher com o valor real da sua execução.** Exemplo de redação esperada no relatório:
-> *"O modelo atingiu uma acurácia de **XX%** no reconhecimento de 22 sinais estáticos/dinâmicos."*
-
 ### Dataset atual
 
 O dataset de treino reunido contém **687 sequências** distribuídas em **22 classes**:

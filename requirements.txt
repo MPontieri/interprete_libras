@@ -8,3 +8,4 @@ seaborn
 matplotlib
 joblib
 scipy
+pyttsx3

@@ -9,7 +9,8 @@ import time
 import mediapipe as mp
 from scipy import stats
 import tensorflow as tf
-
+import pyttsx3
+import threading
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
@@ -33,6 +34,14 @@ class DetectorLibras:
         self.tempo_mostra = 0
         self.ultima_predicao = 0
         self.intervalo_predicao = 0.05  # 50ms entre predicoes
+        
+        self.tts = pyttsx3.init()
+        self.tts.setProperty('rate', 160)
+        self.tts.setProperty('volume', 1.0)
+
+        self.ultima_fala = ""
+        self.tempo_ultima_fala = 0
+        self.intervalo_fala = 2.0  # segundos
 
     def carregar_modelos(self):
         try:
@@ -45,7 +54,7 @@ class DetectorLibras:
             exit()
 
     def inicializar_camera(self):
-        self.cap = cv2.VideoCapture(1, cv2.CAP_V4L2)
+        self.cap = cv2.VideoCapture(2, cv2.CAP_V4L2)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         self.cap.set(cv2.CAP_PROP_FPS, 30)
@@ -137,14 +146,23 @@ class DetectorLibras:
         pred_classe = np.argmax(pred_proba)
         confianca = np.max(pred_proba)
         
-        if confianca > 0.6:
+        if confianca > 0.75:
             letra = self.label_encoder.inverse_transform([pred_classe])[0]
-            
-            # Atualiza imediatamente
             self.ultima_letra = letra
             self.confianca = confianca
             self.letra_mostrada = letra
             self.tempo_mostra = time.time()
+            agora = time.time()
+
+            if (
+                letra != self.ultima_fala
+                or agora - self.tempo_ultima_fala >= self.intervalo_fala
+            ):
+
+                self.ultima_fala = letra
+                self.tempo_ultima_fala = agora
+
+                self.falar_async(letra)
 
     def desenhar_landmarks(self, frame):
 
@@ -187,67 +205,159 @@ class DetectorLibras:
                         (255, 100, 0),
                         1)
                 
+    def falar(self, texto):
+        try:
+            texto = texto.replace("_", " ")
+            self.tts.say(texto)
+            self.tts.runAndWait()
+
+        except Exception as e:
+            print("Erro ao falar:", e)
+
+
+    def falar_async(self, texto):
+        threading.Thread(
+            target=self.falar,
+            args=(texto,),
+            daemon=True
+        ).start()
+                    
 
     def desenhar_interface(self, frame):
         h, w = frame.shape[:2]
-        
-        cv2.putText(frame, f"FPS: {int(self.fps)}", (w-80, 25),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
-        
-        status = "OK" if self.mao_detectada else "SEM MAO"
-        cor = (0, 255, 0) if self.mao_detectada else (0, 0, 255)
-        cv2.putText(frame, status, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, cor, 1)
-        
-        # Mostra buffer
-        if self.mao_detectada:
-            cv2.putText(frame, f"B:{len(self.buffer_frames)}", (w-80, 45),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
-        
-        # Letra grande
-        if self.letra_mostrada != "?" and time.time() - self.tempo_mostra < 1.5:
-            texto = self.letra_mostrada
 
-            if len(texto) <= 2:
-                escala = 5
+        overlay = frame.copy()
+
+        # Painel superior
+        cv2.rectangle(overlay, (0, 0), (w, 90), (20, 20, 20), -1)
+
+        cv2.addWeighted(overlay, 0.65, frame, 0.35, 0, frame)
+
+        # FPS
+        cv2.putText(
+            frame,
+            f"FPS: {int(self.fps)}",
+            (20, 35),
+            cv2.FONT_HERSHEY_DUPLEX,
+            0.8,
+            (255, 255, 255),
+            2
+        )
+
+        # Status
+        status = "MAO DETECTADA" if self.mao_detectada else "AGUARDANDO"
+
+        cor_status = (0, 255, 0) if self.mao_detectada else (0, 0, 255)
+
+        cv2.putText(
+            frame,
+            status,
+            (20, 70),
+            cv2.FONT_HERSHEY_DUPLEX,
+            0.8,
+            cor_status,
+            2
+        )
+
+        # Buffer
+        cv2.putText(
+            frame,
+            f"BUFFER: {len(self.buffer_frames)}/{self.sequencia_tamanho}",
+            (w - 250, 35),
+            cv2.FONT_HERSHEY_DUPLEX,
+            0.7,
+            (255, 255, 255),
+            2
+        )
+
+        # Confiança
+        cv2.putText(
+            frame,
+            f"CONFIANCA: {int(self.confianca*100)}%",
+            (w - 250, 70),
+            cv2.FONT_HERSHEY_DUPLEX,
+            0.7,
+            (255, 255, 255),
+            2
+        )
+
+        # Texto reconhecido
+        if (
+            self.letra_mostrada != "?"
+            and time.time() - self.tempo_mostra < 1.5
+        ):
+
+            texto = self.letra_mostrada.replace("_", " ")
+
+            if len(texto) <= 4:
+                escala = 4
+                espessura = 6
+
+            elif len(texto) <= 8:
+                escala = 2.8
                 espessura = 5
-            elif len(texto) <= 5:
-                escala = 3
-                espessura = 4
-            elif len(texto) <= 10:
-                escala = 2
-                espessura = 3
+
             else:
-                escala = 1.5
-                espessura = 2
+                escala = 1.8
+                espessura = 4
 
             tamanho = cv2.getTextSize(
                 texto,
-                cv2.FONT_HERSHEY_SIMPLEX,
+                cv2.FONT_HERSHEY_DUPLEX,
                 escala,
                 espessura
             )[0]
 
             x = (w - tamanho[0]) // 2
-            y = (h + tamanho[1]) // 2 - 50
+            y = h // 2
 
+            # sombra
+            cv2.putText(
+                frame,
+                texto,
+                (x + 3, y + 3),
+                cv2.FONT_HERSHEY_DUPLEX,
+                escala,
+                (0, 0, 0),
+                espessura + 2
+            )
+
+            # texto principal
             cv2.putText(
                 frame,
                 texto,
                 (x, y),
-                cv2.FONT_HERSHEY_SIMPLEX,
+                cv2.FONT_HERSHEY_DUPLEX,
                 escala,
                 (0, 255, 255),
                 espessura
             )
-            
-            # Barra de confianca
-            barra_x, barra_y = x, y + 40
-            cv2.rectangle(frame, (barra_x, barra_y), (barra_x + 150, barra_y + 10), (50, 50, 50), -1)
-            cv2.rectangle(frame, (barra_x, barra_y), 
-                         (barra_x + int(150 * self.confianca), barra_y + 10), (0, 255, 0), -1)
-            cv2.putText(frame, f"{int(self.confianca*100)}%", (barra_x + 160, barra_y + 10),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
 
+            # barra de confiança
+            largura = 300
+            altura = 25
+
+            bx = (w - largura) // 2
+            by = y + 50
+
+            cv2.rectangle(
+                frame,
+                (bx, by),
+                (bx + largura, by + altura),
+                (70, 70, 70),
+                -1
+            )
+
+            cv2.rectangle(
+                frame,
+                (bx, by),
+                (
+                    bx + int(largura * self.confianca),
+                    by + altura
+                ),
+                (0, 255, 0),
+                -1
+            )
     def executar(self):
         print("DETECTOR LIBRAS - MODO RAPIDO")
         print("ESC para sair")
